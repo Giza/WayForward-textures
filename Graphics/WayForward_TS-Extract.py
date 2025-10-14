@@ -3,21 +3,22 @@ import sys
 import platform
 import glob
 import struct
+import argparse
 from PIL import Image, ImagePalette
 
 # WayForward GBA/DS/LeapFrog Didj/Leapster tileset (*.TS4 / *.TS8) metatile extraction script written by Random Talking Bush.
 # Based only slightly on onepill's TextureUnpacker script: https://github.com/onepill/texture_unpacker_scirpt
 
-TSFormat = 0 # See the list below for which value should be used for the game you're ripping from.
-TilesetName = "365" # The name of the tileset TS4/TS8 file, minus extension. Will also be the exported image's filename with a "_metatile" suffix added. (Example: "363" and "365" are for the Bramble Maze's background and foreground .TS4 filenames respectively when using my QuickBMS script to unpack Shantae Advance: Risky Revolution.)
-SceneName = "362" # The name of the .SCN or .PAL file to use the palette from, minus extension. Leave blank to use a grayscale palette. (Example: "362" is filename for the Bramble Maze scene when using my QuickBMS script to unpack Shantae Advance: Risky Revolution.) Ignored when TSFormat = 4 (Leapster sprites have no separate palettes).
-
-UseGBAROM = False # Change this to True to read from a GBA ROM instead of a .TS4/.TS8 file. Make sure both the "ROMName" and "TilesetStart" lines below are filled in correctly. For experts only -- you're better off using my QuickBMS scripts to unpack the ROM files instead.
-ROMName = "Shantae.gba" # Game Boy Advance ROM file needed to extract tile data. Ignored when UseGBAROM is False (it uses the "TilesetName" above instead).
-TilesetStart = 0x962774 # Offset to the start of metatile data in a GBA ROM. Ignored when UseGBAROM is False. (Example: 0x962774 is the offset to the Bramble Maze's foreground .TS4 in Shantae Advance: Risky Revolution.)
-SceneStart = 0x95C5DC # Offset to the start of scene data in a GBA ROM. Ignored when UseGBAROM is False. (Example: 0x95C5DC is the offset to the Bramble Maze's SCN file in Shantae Advance: Risky Revolution.)
-TileDelimiter = False # Debug option for GBA tilesets with more than 1024 tiles (see "BROKEN TILESETS" section below). This will start ignoring the tile flip flags as soon as it detects a tile with ID 0x0400 (which would correspond to a horizontally-flipped blank tile). This will not "repair" the tileset, but it will make the last section at least *somewhat* legible.
-RawPalette = True # Set this to True to read palette values as multiples of 8 (0, 8, 16, etc. with max of 248 for DS or 240 for Leapster). Set this to False to recalculate them to 255 maximum like most emulators would display.
+# Значения по умолчанию (могут быть переопределены аргументами командной строки)
+TSFormat = 1
+TilesetName = "STATUS"
+SceneName = "STATUS"
+UseGBAROM = False
+ROMName = "Shantae.gba"
+TilesetStart = 0x962774
+SceneStart = 0x95C5DC
+TileDelimiter = False
+RawPalette = True
 
 # Instructions on how to use this script:
 # 1. Install both Python (either 2 or 3, both work) and Pillow: https://github.com/python-pillow/Pillow
@@ -103,6 +104,44 @@ RawPalette = True # Set this to True to read palette values as multiples of 8 (0
 # Unfabulous! = 191 and 236
 # --------------------------------------------------------------------------------
 # Everything below this line should be left alone.
+
+def parse_arguments():
+    """Парсит аргументы командной строки"""
+    parser = argparse.ArgumentParser(
+        description='WayForward TS4/TS8 распаковщик метатайлов',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Примеры использования:
+  tool.exe STATUS
+  tool.exe LEVEL2 --format 2 --scene LEVEL2
+  tool.exe 363 --format 1 --scene 362
+        '''
+    )
+    
+    parser.add_argument('tileset', nargs='?', default=TilesetName,
+                        help='Имя TS4/TS8 файла без расширения (по умолчанию: STATUS)')
+    parser.add_argument('--format', '-f', type=int, default=TSFormat,
+                        help='Формат TS (0-4, по умолчанию: 1)')
+    parser.add_argument('--scene', '-s', default=SceneName,
+                        help='Имя SCN/PAL файла для палитры (по умолчанию: такое же как tileset)')
+    parser.add_argument('--raw-palette', action='store_true', default=RawPalette,
+                        help='Использовать сырые значения палитры')
+    parser.add_argument('--no-raw-palette', dest='raw_palette', action='store_false',
+                        help='Нормализовать значения палитры')
+    
+    args = parser.parse_args()
+    
+    return args
+
+if __name__ == "__main__":
+    # Парсим аргументы командной строки
+    args = parse_arguments()
+    
+    # Применяем аргументы
+    TilesetName = args.tileset
+    TSFormat = args.format
+    SceneName = args.scene if args.scene else args.tileset
+    RawPalette = args.raw_palette
 
 if UseGBAROM == False:
     TilesetStart = 0x0 # Zeroing out the offset, as .TS4/.TS8 files have it at the beginning.

@@ -3,18 +3,19 @@ import sys
 import platform
 import glob
 import struct
+import argparse
 from PIL import Image
 
 # WayForward GBA/DS/LeapFrog Didj/Leapster screen / map (*.LYR) extraction script written by Random Talking Bush.
 # Based only slightly on onepill's TextureUnpacker script: https://github.com/onepill/texture_unpacker_scirpt
 
-LYRFormat = 0 # See the list below for which value should be used for the game you're ripping from.
-MetatilesName = "BrambleMaze" # PNG exported from my "WayForward_TS-Extract" script, minus the "_metatile" suffix. If a PNG matching the .LYR's internal tileset ID is autodetected (such as "311_metatile.png", useful for pairing GBA .LYR files), that will be used instead.
-ScreenName = "366" # Filename of .LYR file, minus extension. Ignored when UseGBAROM is True. (Example: "366" will be the first foreground layer of the Bramble Maze when using my QuickBMS script to unpack Shantae Advance: Risky Revolution.)
-
-UseGBAROM = False # Change this to true to read from a GBA ROM instead of a .LYR file. Make sure both the "ROMName" and "ScreenStart" lines below are filled in correctly.
-ROMName = "Shantae.gba" # GBA ROM file needed to extract map data. Ignored when UseGBAROM is False.
-ScreenStart = 0x96B074 # Offset to the start of the screen data in a GBA ROM. Ignored when UseGBAROM is False. (Example: "0x96B074" will be the first foreground layer of the Bramble Maze in Shantae Advance: Risky Revolution.)
+# Значения по умолчанию (могут быть переопределены аргументами командной строки)
+LYRFormat = 2
+MetatilesName = "STATUS"
+ScreenName = "STATUS"
+UseGBAROM = False
+ROMName = "Shantae.gba"
+ScreenStart = 0x96B074
 
 # Instructions on how to use this script:
 # 1. Install both Python (either 2 or 3, both work) and Pillow: https://github.com/python-pillow/Pillow
@@ -94,6 +95,39 @@ ScreenStart = 0x96B074 # Offset to the start of the screen data in a GBA ROM. Ig
 # --------------------------------------------------------------------------------
 # Everything below this line should be left alone.
 
+def parse_arguments():
+    """Парсит аргументы командной строки"""
+    parser = argparse.ArgumentParser(
+        description='WayForward LYR распаковщик карт/экранов',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Примеры использования:
+  python WayForward_LYR-Extract.py STATUS
+  python WayForward_LYR-Extract.py LEVEL2 --format 2 --metatiles LEVEL2
+  python WayForward_LYR-Extract.py 366 --format 2 --metatiles 365
+        '''
+    )
+    
+    parser.add_argument('screen', nargs='?', default=ScreenName,
+                        help='Имя LYR файла без расширения (по умолчанию: STATUS)')
+    parser.add_argument('--format', '-f', type=int, default=LYRFormat,
+                        help='Формат LYR (0-3, по умолчанию: 2)')
+    parser.add_argument('--metatiles', '-m', default=MetatilesName,
+                        help='Имя PNG файла метатайлов (по умолчанию: такое же как screen)')
+    
+    args = parser.parse_args()
+    
+    return args
+
+if __name__ == "__main__":
+    # Парсим аргументы командной строки
+    args = parse_arguments()
+    
+    # Применяем аргументы
+    ScreenName = args.screen
+    LYRFormat = args.format
+    MetatilesName = args.metatiles if args.metatiles != MetatilesName else args.screen
+
 if UseGBAROM == False:
     if not os.path.exists(ScreenName + ".lyr"):
         print("Can't find '" + ScreenName + ".lyr'. Check to make sure you filled in the 'ScreenName' entry correctly.")
@@ -139,7 +173,7 @@ else:
 
 if not os.path.exists(str(ScreenTilesetID) + '_metatile.png'):
     if not os.path.exists(MetatilesName + '_metatile.png'):
-        print("Can't find metatile image '" + MetatilesName + "_metatile.png'. Run the 'WayForward_TS-Extract' script to generate one first, or correct the 'MetatilesName' entry if you already did.")
+        print("Can't find metatile image '" + MetatilesName + "_metatile.png'. Run the 'tool' script to generate one first, or correct the 'MetatilesName' entry if you already did.")
         os.system('pause')
         exit()
     else:
@@ -147,6 +181,15 @@ if not os.path.exists(str(ScreenTilesetID) + '_metatile.png'):
 else:
     sprfile = Image.open(str(ScreenTilesetID) + '_metatile.png') # Override the "MetatilesName" entry above if it finds a matching ID. Helpful for GBA games.
     print("Found tileset matching internal ID ('" + str(ScreenTilesetID) + "_metatile.png') using that instead.")
+
+# Определяем режим и палитру исходного файла метатайлов
+metatile_mode = sprfile.mode
+metatile_palette = None
+if metatile_mode == 'P':
+    metatile_palette = sprfile.getpalette()
+    print(f"Metatile image mode: Paletted (8-bit) with {len(metatile_palette)//3} colors")
+else:
+    print(f"Metatile image mode: {metatile_mode}")
 
 ScreenIDRet = scrfile.tell()
 for x in range(ScreenWidth * ScreenHeight):
@@ -166,7 +209,13 @@ if LYRFormat > 2:
 
 for x in range(ScreenCount):
     MetatileStartX = 0; MetatileStartY = 0; MetatilePasteX = 0; MetatilePasteY = 0 # Initializing values for screen assembly.
-    ScreenImage = Image.new('RGBA', (256, 256), (0, 0, 0, 0)) # Initializing the assembled screen PNG in memory.
+    # Создаем изображение в том же режиме что и метатайлы
+    if metatile_mode == 'P':
+        ScreenImage = Image.new('P', (256, 256), 0) # Paletted mode
+        if metatile_palette:
+            ScreenImage.putpalette(metatile_palette)
+    else:
+        ScreenImage = Image.new('RGBA', (256, 256), (0, 0, 0, 0)) # RGBA mode
     for y in range(256):
         MetatileID = struct.unpack('<H', scrfile.read(2))[0] # Which metatile is used for this offset. Screens are always 16x16 metatiles, or 256x256.
         if ScreenFlags == 0x0010 or ScreenFlags == 0x0020:
@@ -197,7 +246,13 @@ for x in range(ScreenCount):
 
 scrfile.seek(ScreenIDRet, 0) # Now let's try building the entire map...
 MetatilePasteX = 0; MetatilePasteY = 0 # Re-initializing values for screen assembly.
-MapImage = Image.new('RGBA', ((ScreenWidth * 256), (ScreenHeight * 256)), (0, 0, 0, 0)) # Initializing the full map PNG in memory.
+# Создаем полную карту в том же режиме что и метатайлы
+if metatile_mode == 'P':
+    MapImage = Image.new('P', ((ScreenWidth * 256), (ScreenHeight * 256)), 0) # Paletted mode
+    if metatile_palette:
+        MapImage.putpalette(metatile_palette)
+else:
+    MapImage = Image.new('RGBA', ((ScreenWidth * 256), (ScreenHeight * 256)), (0, 0, 0, 0)) # RGBA mode
 
 print("Building full map (" + str(ScreenWidth) + "x" + str(ScreenHeight) + ") screens...")
 for x in range(ScreenWidth * ScreenHeight):
@@ -218,3 +273,5 @@ else:
     outfile = (str(ScreenStart) + '/' + 'Full.png') # Setting up the full map file path, will use the ROM's offset as the name for the folder.
 MapImage.save(outfile) # Saving the assembled map.
 print("Saved to " + outfile) # We did the other thing.
+if metatile_mode == 'P':
+    print(f"Map saved in paletted mode (8-bit) with PLTE chunk preserved")
